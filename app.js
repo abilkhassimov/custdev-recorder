@@ -1,746 +1,115 @@
-/* ══════════════════════════════════════════════════════════════
-   E-AUDITOR · полевой диктофон кастдева
-   Приложение-суфлёр: один экран с именем собеседника, запись всего
-   разговора в фоне, вопросы блоками как подсказка. По завершении
-   аудио целиком уходит в папку кастдева на Google Drive. Ввод текста
-   в интервью нет: только имя в начале и живая запись. Разбор с
-   вердиктом собирается уже на сервере, вне этого приложения.
+import {
+  validateConfig, normalizeQuestionnaire, addBlock, addQuestion, deleteBlock, deleteQuestion,
+  moveBlock, moveQuestion, updateBlock, updateQuestion, safeFilename, buildMarkdown, migrateState
+} from './frontend-core.js';
 
-   Надёжность: запись копится в памяти И параллельно пишется в IndexedDB
-   посекундными кусками. Если вкладку убьёт система или закрыть до заливки,
-   при следующем открытии приложение предложит отправить недозаписанное.
-   Плюс экран удерживается от гашения через Wake Lock,
-   пока идёт запись. Уход со страницы во время записи и заливки
-   перехватывается предупреждением.
-   ══════════════════════════════════════════════════════════════ */
+const STORAGE = 'custdev-recorder-settings';
+const root = document.querySelector('#app');
+const status = document.querySelector('#status');
+let settings = loadSettings();
+let draft = settings?.questionnaire || null;
+let step = 0;
+let session = null;
+let publicConfig = null;
+let pickerReady;
+const recording = { recorder: null, stream: null, chunks: [], blob: null, mime: '', startedAt: null, timer: null, block: 0, busy: false };
 
-/* ── вступление: говорим вслух, не читаем с экрана дословно ──── */
-const INTRO =
-  'Спасибо за полчаса. Я ничего не продаю и презентацию не показываю. ' +
-  'Наш разговор я записываю на диктофон, чтобы потом не по памяти восстанавливать, вы не против? ' +
-  'Хочу понять, как вы держите руку на пульсе компании: какие цифры смотрите ' +
-  'и где их берёте, когда сотрудников уже не десять.';
-
-/* ── блоки вопросов: пять блоков, показываем блок целиком ── */
-const BLOCKS = [
-  {
-    t: 'Компания и роль',
-    q: [
-      'Расскажите про компанию: чем занимаетесь, что продаёте, сколько лет на рынке?',
-      'Сколько сейчас человек в команде и как выросли за последние пару лет?',
-      'За что отвечаете лично, а что уже отдали людям и смотрите со стороны?',
-      'Что из ежедневной работы компании вы перестали видеть сами, когда стало больше людей?'
-    ]
-  },
-  {
-    t: 'Как держите руку на пульсе',
-    q: [
-      'Когда утром хотите понять, как идут дела, куда смотрите первым делом и какие две-три цифры ищете?',
-      'Как эти цифры до вас доходят: отчёт от финдира, 1С, свой Excel, звонок бухгалтеру, на глаз? И как часто?',
-      'Выручка, себестоимость, маржа: что видите живьём в любой день, а что узнаёте раз в месяц из отчёта?',
-      'Какой цифры или картины про компанию у вас сейчас нет под рукой, а хотелось бы видеть в любой момент?'
-    ]
-  },
-  {
-    t: 'Долги, закупки, налоги',
-    q: [
-      'Дебиторка и кредиторка: как сейчас видите, кто вам должен и кому должны вы, где эта картина живёт и когда последний раз она вас подвела?',
-      'Закупки и запасы: как отслеживаете, что и почём закупается, у кого это в голове или в системе, случалось ли переплатить или закупить лишнее?',
-      'Налоги и обязательные платежи: как узнаёте, что подходит срок, было ли, что чуть не пропустили или попали на пени, хотелось бы предупреждение заранее?',
-      'Выручка и прибыль по компании в целом: где смотрите итог и с какой задержкой он до вас доходит? Если не в фокусе, можно пропустить.'
-    ]
-  },
-  {
-    t: 'Где узнали поздно',
-    q: [
-      'Вспомните последний раз, когда важное узнали позже, чем стоило: просадка выручки, кассовый разрыв, лишняя трата, просроченный платёж. Что было?',
-      'Как вы это узнали: случайно, кто-то сказал, сами наткнулись, или сработала процедура?',
-      'Во сколько это обошлось и сколько времени ушло, чтобы распутать?',
-      'Что после этого поменяли, чтобы увидеть раньше, сработало? И сколько раз за год такое всплывало?'
-    ]
-  },
-  {
-    t: 'Ценность и контакты',
-    q: [
-      'Если бы завтра в телефоне была одна страница про компанию, какие пять цифр или списков вы бы на неё поставили?',
-      'Кто и за сколько сейчас собирает вам эту картину: финдир, бухгалтерия, вы сами по вечерам? Во сколько в год обходится?',
-      'За последние два года покупали что-то ради порядка в цифрах: ERP, доработку 1С, BI, аудит, консультантов? Что и почём?',
-      'Кого из знакомых собственников стоит спросить про то же самое?'
-    ]
-  }
-];
-
-const MARK =
-  '<svg class="mark" viewBox="0 0 26 26" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
-  '<rect x="1.5" y="1.5" width="23" height="23" rx="2.5" stroke="var(--brass)" stroke-width="2"/>' +
-  '<rect x="8" y="8" width="10" height="10" rx="1.5" fill="var(--jade)"/></svg>';
-
-/* ── мелочи ─────────────────────────────────────────────────── */
-const app = document.getElementById('app');
-const toastEl = document.getElementById('toast');
-let toastTimer = null;
-function toast(msg) {
-  toastEl.textContent = msg;
-  toastEl.classList.add('on');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toastEl.classList.remove('on'), 2600);
-}
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-function pad2(n) { return n < 10 ? '0' + n : '' + n; }
-function stamp(ts) {
-  const d = ts ? new Date(ts) : new Date();
-  return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) +
-    ' ' + pad2(d.getHours()) + '-' + pad2(d.getMinutes()) + '-' + pad2(d.getSeconds());
-}
-
-/* fetch с таймаутом: висящую заливку обрываем, а не ждём вечно */
-async function fetchT(url, opts, ms) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), ms);
+function loadSettings() { try { return migrateState(JSON.parse(localStorage.getItem(STORAGE))); } catch { return null; } }
+function saveSettings(value) { settings = migrateState(value); if (!settings) throw new Error('Настройки неполные'); localStorage.setItem(STORAGE, JSON.stringify(settings)); }
+function esc(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])); }
+function announce(message, error = false) { status.textContent = message; status.className = error ? 'status error' : 'status'; }
+async function api(url, options = {}, timeout = 60000) {
+  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    return await fetch(url, Object.assign({}, opts, { signal: ctrl.signal }));
-  } finally {
-    clearTimeout(t);
-  }
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error?.message || body.error || `Ошибка ${response.status}`);
+    return body;
+  } catch (error) { if (error.name === 'AbortError') throw new Error('Сервер не ответил вовремя'); throw error; }
+  finally { clearTimeout(timer); }
 }
+function header(subtitle = 'Полевой диктофон интервью') { return `<header><div class="brand"><span class="logo" aria-hidden="true">●</span><div><b>CustDev Recorder</b><small>${esc(subtitle)}</small></div></div><button class="icon-btn" id="settings" aria-label="Настройки">⚙</button></header>`; }
+function bindSettings() { document.querySelector('#settings')?.addEventListener('click', renderSettings); }
+function shell(content, actions = '') { root.innerHTML = `${header()}<main>${content}</main>${actions ? `<footer>${actions}</footer>` : ''}`; bindSettings(); }
+function button(id, text, kind = 'primary', extra = '') { return `<button id="${id}" class="${kind}" ${extra}>${text}</button>`; }
 
-/* ── состояние одной сессии ─────────────────────────────────── */
-const state = {
-  name: '',
-  block: 0,
-  rec: null,
-  stream: null,
-  chunks: [],
-  mime: '',
-  blob: null,
-  t0: 0,
-  uid: '',          // случайный ключ записи: по нему сервер точно опознаёт файл в Drive
-  uploadTried: false, // была ли уже попытка заливки (тогда перед повтором сперва проверяем Drive)
-  tick: null,
-  wake: null,
-  busy: false,      // защита от двойного клика на старт/стоп
-  stopped: false,   // onStopped отработал ровно один раз
-  guarding: false,  // висит ли перехват ухода со страницы
-  wakeReq: false,   // запрос wake lock в полёте, чтобы не плодить гонку
-  idbChain: null,   // последовательная очередь записи кусков в IndexedDB
-  idbOk: true       // удаётся ли писать резерв в устройство (false = только память)
-};
+async function checkSession() { try { session = await api('/api/auth/session', {}, 12000); } catch { session = null; } return session; }
+async function start() { await checkSession(); if (settings) renderStart(); else { step = session ? 1 : 0; renderOnboarding(); } }
 
-// Случайный hex-ключ одной записи. Кладётся в appProperties файла на Drive,
-// чтобы проверка «долетел ли файл» шла по точному id, а не по неуникальному имени.
-function makeUid() {
+function progress() { return `<ol class="steps" aria-label="Настройка"><li class="${step===0?'active':''}">Google</li><li class="${step===1?'active':''}">Папка</li><li class="${step===2?'active':''}">Опросник</li><li class="${step===3?'active':''}">Проверка</li></ol>`; }
+function renderOnboarding() {
+  if (step === 0) return renderAuth();
+  if (step === 1) return renderFolder();
+  if (step === 2) return renderImport();
+  renderEditor(true);
+}
+function renderAuth() {
+  shell(`${progress()}<section><p class="eyebrow">Шаг 1 из 4</p><h1>Подключите Google Drive</h1><p>Приложение сохраняет аудио и расшифровку только в выбранную вами папку. Доступ выдаётся через Google; токены не сохраняются в localStorage.</p><div class="notice">Записывайте интервью только с явного согласия собеседника. Аудио обрабатывается сервисом распознавания и загружается напрямую в ваш Google Drive.</div>${session ? `<p class="success">Подключено: ${esc(session.email)}</p>` : `<a class="button primary" href="/api/auth/google">Войти через Google</a>`}</section>`, session ? button('next','Продолжить') : button('retry','Проверить подключение','secondary'));
+  document.querySelector(session ? '#next' : '#retry').onclick = async () => { announce('Проверяю подключение…'); if (await checkSession()) { step = 1; renderOnboarding(); } else announce('Google Drive пока не подключён', true); };
+}
+async function loadPicker() {
+  if (!publicConfig) publicConfig = validateConfig(await api('/api/config'));
+  if (!window.gapi) await new Promise((resolve, reject) => { const s=document.createElement('script'); s.src='https://apis.google.com/js/api.js'; s.onload=resolve; s.onerror=()=>reject(new Error('Не удалось загрузить Google Picker')); document.head.append(s); });
+  if (!pickerReady) pickerReady = new Promise((resolve, reject) => window.gapi.load('picker', { callback: resolve, onerror: () => reject(new Error('Google Picker недоступен')) }));
+  await pickerReady;
+}
+async function chooseFolder() {
+  announce('Открываю Google Drive…');
   try {
-    const a = new Uint8Array(16);
-    (crypto || window.crypto).getRandomValues(a);
-    return Array.from(a, b => b.toString(16).padStart(2, '0')).join('');
-  } catch (e) {
-    return (Date.now().toString(16) + Math.random().toString(16).slice(2)).slice(0, 32).padEnd(32, '0');
-  }
-}
-
-/* ── стойкое хранилище кусков: страховка от убитой вкладки ──────
-   Каждый посекундный кусок падает не только в память, но и в IndexedDB.
-   Если вкладку прибьёт система или заливку оборвёт, при следующем
-   открытии предложим отправить недозаписанное.
-   Память остаётся быстрым путём, IDB страховкой. */
-const IDB_NAME = 'custdev-rec';
-let idbDb = null;
-function idbOpen() {
-  return new Promise((resolve, reject) => {
-    if (!('indexedDB' in window)) { reject(new Error('no idb')); return; }
-    const rq = indexedDB.open(IDB_NAME, 1);
-    rq.onupgradeneeded = () => {
-      const db = rq.result;
-      if (!db.objectStoreNames.contains('chunks')) db.createObjectStore('chunks', { autoIncrement: true });
-      if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
-    };
-    rq.onsuccess = () => resolve(rq.result);
-    rq.onerror = () => reject(rq.error || new Error('idb open'));
-  });
-}
-async function idbHandle() { if (idbDb) return idbDb; idbDb = await idbOpen(); return idbDb; }
-function idbRun(db, store, mode, fn) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(store, mode);
-    fn(tx.objectStore(store));
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error || new Error('idb abort'));
-  });
-}
-function idbGet(db, store, key) {
-  return new Promise((resolve, reject) => {
-    const rq = db.transaction(store, 'readonly').objectStore(store).get(key);
-    rq.onsuccess = () => resolve(rq.result);
-    rq.onerror = () => reject(rq.error);
-  });
-}
-function idbGetAll(db, store) {
-  return new Promise((resolve, reject) => {
-    const rq = db.transaction(store, 'readonly').objectStore(store).getAll();
-    rq.onsuccess = () => resolve(rq.result || []);
-    rq.onerror = () => reject(rq.error);
-  });
-}
-// Старт новой записи: чистим прошлое и кладём метаданные ОДНОЙ транзакцией на оба
-// стора, иначе частичный сбой смешает куски и мету. Возвращаем true/false —
-// удался ли резерв. Промис, на который встаёт очередь записи кусков.
-async function idbReset(meta) {
-  try {
-    const db = await idbHandle();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction(['chunks', 'meta'], 'readwrite');
-      tx.objectStore('chunks').clear();
-      tx.objectStore('meta').put(meta, 'cur');
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error || new Error('idb abort'));
+    await loadPicker(); const token = await api('/api/google/access-token');
+    const folder = await new Promise((resolve, reject) => {
+      const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS).setIncludeFolders(true).setSelectFolderEnabled(true);
+      new google.picker.PickerBuilder().setDeveloperKey(publicConfig.googlePickerApiKey).setAppId(publicConfig.googleProjectNumber).setOAuthToken(token.accessToken).addView(view).setCallback(data => {
+        if (data.action === google.picker.Action.PICKED) resolve(data.docs[0]);
+        if (data.action === google.picker.Action.CANCEL) reject(new Error('Выбор папки отменён'));
+      }).build().setVisible(true);
     });
-    return true;
-  } catch (e) { return false; }   // без IDB просто нет страховки, память работает
+    settings = { version: 2, folder: { id: folder.id, name: folder.name }, questionnaire: draft || { title:'', blocks:[] } };
+    announce(`Выбрана папка «${folder.name}»`); renderFolder();
+  } catch (error) { announce(error.message, true); }
 }
-function idbAddChunk(blob) {
-  // Резерв отвалился (или сброс прошлой сессии не удался): больше не пишем в IDB,
-  // иначе новые куски лягут поверх непочищенных старых и восстановление смешает две записи.
-  if (state.idbOk === false) return state.idbChain || Promise.resolve();
-  state.idbChain = (state.idbChain || Promise.resolve()).then(async () => {
-    try { const db = await idbHandle(); await idbRun(db, 'chunks', 'readwrite', st => st.add(blob)); }
-    catch (e) {
-      // Кусок не лёг в резерв (например, кончилась квота). Больше не обещаем
-      // восстановление и предупреждаем один раз, при первом же сбое.
-      if (state.idbOk !== false) { state.idbOk = false; toast('Резерв в устройстве отвалился, держите вкладку открытой'); }
-    }
-  });
-  return state.idbChain;
+function renderFolder() {
+  shell(`${progress()}<section><p class="eyebrow">Шаг 2 из 4</p><h1>Куда сохранять интервью?</h1><p>Выберите папку в Google Drive. Приложение запомнит только её идентификатор и название.</p>${settings?.folder ? `<div class="selected"><b>${esc(settings.folder.name)}</b><small>Папка Google Drive выбрана</small></div>` : ''}${button('pick',settings?.folder?'Выбрать другую папку':'Выбрать папку')}</section>`, `${button('back','Назад','secondary')}${button('next','Продолжить','primary',settings?.folder?'':'disabled')}`);
+  document.querySelector('#pick').onclick=chooseFolder; document.querySelector('#back').onclick=()=>{step=0;renderOnboarding();}; document.querySelector('#next').onclick=()=>{step=2;renderOnboarding();};
 }
-// Помечаем сессию как успешно залитую ДО удаления резерва. Если чистка потом
-// сорвётся, следующий запуск увидит флаг и не предложит залить дубль.
-async function idbMarkDone() {
-  const db = await idbHandle();
-  const meta = await idbGet(db, 'meta', 'cur');
-  if (!meta) return;
-  meta.done = true;
-  await idbRun(db, 'meta', 'readwrite', st => st.put(meta, 'cur'));
+function renderImport() {
+  shell(`${progress()}<section><p class="eyebrow">Шаг 3 из 4</p><h1>Добавьте опросник</h1><p>Загрузите PDF, DOCX, TXT или MD (до 4 МБ) либо вставьте текст. Мы выделим блоки и вопросы — всё можно исправить на следующем шаге.</p><label class="drop">Файл опросника<input id="file" type="file" accept=".pdf,.docx,.txt,.md,application/pdf,text/plain,text/markdown"></label><label>Или вставьте текст<textarea id="questionnaireText" rows="9" placeholder="Название исследования\n\nБлок 1\n1. Первый вопрос?" spellcheck="true"></textarea></label><div class="row">${button('parse','Разобрать опросник')}${button('manual','Создать вручную','secondary')}</div></section>`, button('back','Назад','secondary'));
+  document.querySelector('#back').onclick=()=>{step=1;renderOnboarding();}; document.querySelector('#manual').onclick=()=>{draft={title:'Новый опросник',blocks:[{id:'b1',title:'Первый блок',questions:[{id:'q1',text:'Новый вопрос'}]}]};step=3;renderOnboarding();};
+  document.querySelector('#parse').onclick=async()=>{ const file=document.querySelector('#file').files[0], text=document.querySelector('#questionnaireText').value.trim(); if(!file&&!text)return announce('Выберите файл или вставьте текст',true); const btn=document.querySelector('#parse'); btn.disabled=true; announce('Разбираю опросник…'); try { let options; if(file){const data=new FormData();data.append('file',file);options={method:'POST',body:data};}else options={method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})}; const result=await api('/api/questionnaire/parse',options,120000); draft=normalizeQuestionnaire(result.questionnaire); step=3;renderOnboarding();announce(result.source==='fallback'?'Опросник разобран базовым алгоритмом — проверьте вопросы':'Опросник готов к проверке'); }catch(error){announce(error.message,true);btn.disabled=false;} };
 }
-async function idbClear() {
-  try {
-    const db = await idbHandle();
-    await idbRun(db, 'chunks', 'readwrite', st => st.clear());
-    await idbRun(db, 'meta', 'readwrite', st => st.clear());
-    return true;
-  } catch (e) { return false; }
+function editorMarkup() {
+  return `<label>Название опросника<input id="qtitle" value="${esc(draft.title)}"></label><div id="blocks">${draft.blocks.map((block,bi)=>`<article class="editor-block" data-block="${esc(block.id)}"><div class="editor-head"><input aria-label="Название блока" data-role="block-title" value="${esc(block.title)}"><div class="tools"><button data-action="block-up" aria-label="Поднять блок" ${bi===0?'disabled':''}>↑</button><button data-action="block-down" aria-label="Опустить блок" ${bi===draft.blocks.length-1?'disabled':''}>↓</button><button data-action="block-delete" aria-label="Удалить блок">×</button></div></div>${block.questions.map((q,qi)=>`<div class="question" data-question="${esc(q.id)}"><span>${qi+1}</span><div><textarea data-role="question-text" rows="2" aria-label="Текст вопроса">${esc(q.text)}</textarea><input data-role="question-hint" aria-label="Подсказка" placeholder="Подсказка (необязательно)" value="${esc(q.hint||'')}"></div><div class="tools vertical"><button data-action="question-up" aria-label="Поднять вопрос" ${qi===0?'disabled':''}>↑</button><button data-action="question-down" aria-label="Опустить вопрос" ${qi===block.questions.length-1?'disabled':''}>↓</button><button data-action="question-delete" aria-label="Удалить вопрос">×</button></div></div>`).join('')}<button class="text-btn" data-action="question-add">+ Добавить вопрос</button></article>`).join('')}</div>${button('add-block','+ Добавить блок','secondary')}`;
 }
-async function idbLoad() {
-  try {
-    const db = await idbHandle();
-    const meta = await idbGet(db, 'meta', 'cur');
-    if (!meta || meta.done) return null;   // done = уже залито, дубль не предлагаем
-    const blobs = await idbGetAll(db, 'chunks');
-    if (!blobs.length) return null;
-    return { meta: meta, blobs: blobs };
-  } catch (e) { return null; }
+function captureEditor() {
+  draft={...draft,title:document.querySelector('#qtitle')?.value||draft.title};
+  document.querySelectorAll('.editor-block').forEach(el=>{const bid=el.dataset.block;draft=updateBlock(draft,bid,el.querySelector('[data-role=block-title]').value);el.querySelectorAll('.question').forEach(q=>{draft=updateQuestion(draft,bid,q.dataset.question,{text:q.querySelector('[data-role=question-text]').value,hint:q.querySelector('[data-role=question-hint]').value});});});
+}
+function renderEditor(onboarding=false) {
+  shell(`${onboarding?progress():''}<section><p class="eyebrow">${onboarding?'Шаг 4 из 4':'Настройки'}</p><h1>Проверьте вопросы</h1><p>Вопросы показываются во время записи блоками. Измените порядок и формулировки.</p>${editorMarkup()}</section>`, `${button('back',onboarding?'Назад':'Отмена','secondary')}${button('save',onboarding?'Сохранить и начать':'Сохранить')}`);
+  root.onclick=e=>{const action=e.target.dataset.action;if(!action)return;captureEditor();const b=e.target.closest('[data-block]'),q=e.target.closest('[data-question]');if(action==='block-up')draft=moveBlock(draft,b.dataset.block,-1);if(action==='block-down')draft=moveBlock(draft,b.dataset.block,1);if(action==='block-delete')draft=deleteBlock(draft,b.dataset.block);if(action==='question-add')draft=addQuestion(draft,b.dataset.block);if(action==='question-up')draft=moveQuestion(draft,b.dataset.block,q.dataset.question,-1);if(action==='question-down')draft=moveQuestion(draft,b.dataset.block,q.dataset.question,1);if(action==='question-delete')draft=deleteQuestion(draft,b.dataset.block,q.dataset.question);renderEditor(onboarding);};
+  document.querySelector('#add-block').onclick=()=>{captureEditor();draft=addBlock(draft);renderEditor(onboarding);};
+  document.querySelector('#back').onclick=()=>onboarding?(step=2,renderOnboarding()):renderSettings();
+  document.querySelector('#save').onclick=()=>{try{captureEditor();draft=normalizeQuestionnaire(draft);saveSettings({...settings,questionnaire:draft});announce('Настройки сохранены');renderStart();}catch(error){announce(error.message,true);}};
 }
 
-/* ── спросить сервер, лёг ли файл в Drive ──────────────────────
-   Последняя проверка перед тем, как признать провал. Клиентский PUT идёт
-   напрямую в Google, и ответ может потеряться, когда байты уже закоммичены;
-   финализированная сессия на повторный опрос порой отвечает 4xx. Сервер
-   смотрит саму папку по имени и метке приложения — это честный ответ. */
-async function verifyUploaded(uid, name, size) {
-  try {
-    const r = await fetchT('/api/verify-upload', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uid, name, size })
-    }, 20000);
-    if (!r.ok) return false;
-    const j = await r.json();
-    return !!(j && j.found);
-  } catch (e) { return false; }
+function renderStart() {
+  shell(`<section><p class="eyebrow">Полевой диктофон интервью</p><h1>Новое интервью</h1><p>Запись идёт одним разговором. После остановки приложение распознает речь, сопоставит ответы с вопросами и сохранит аудио и Markdown в «${esc(settings.folder.name)}».</p><label>Проект<input id="project" autocomplete="organization" placeholder="Например, исследование доставки"></label><label>Собеседник<input id="interviewee" autocomplete="name" placeholder="Имя или код респондента"></label><div class="notice">Перед началом получите согласие на запись. Не закрывайте вкладку во время записи и обработки.</div></section>`,button('record','Начать запись'));
+  document.querySelector('#record').onclick=beginRecording;
+}
+function pickMime(){return ['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg'].find(x=>window.MediaRecorder?.isTypeSupported(x))||'';}
+async function beginRecording(){const project=document.querySelector('#project').value.trim(),interviewee=document.querySelector('#interviewee').value.trim();if(!project||!interviewee)return announce('Укажите проект и собеседника',true);try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});recording.stream=stream;recording.mime=pickMime();recording.chunks=[];recording.startedAt=new Date().toISOString();recording.project=project;recording.interviewee=interviewee;recording.block=0;recording.recorder=new MediaRecorder(stream,recording.mime?{mimeType:recording.mime,audioBitsPerSecond:48000}:{});recording.recorder.ondataavailable=e=>{if(e.data.size)recording.chunks.push(e.data);};recording.recorder.onstop=finishRecording;recording.recorder.start(1000);window.addEventListener('beforeunload',guard);renderLive();}catch(error){announce(error.name==='NotAllowedError'?'Разрешите доступ к микрофону':'Не удалось начать запись',true);}}
+function guard(e){e.preventDefault();e.returnValue='';}
+function renderLive(){const b=settings.questionnaire.blocks[recording.block];shell(`<section class="live"><div class="live-line"><span class="pulse"></span><b id="clock">00:00</b> Идёт запись</div><p class="eyebrow">Блок ${recording.block+1} из ${settings.questionnaire.blocks.length}</p><h1>${esc(b.title)}</h1><ol class="questions">${b.questions.map(q=>`<li><b>${esc(q.text)}</b>${q.hint?`<small>${esc(q.hint)}</small>`:''}</li>`).join('')}</ol></section>`,`${button('prev','Назад','secondary',recording.block?'':'disabled')}${button('next',recording.block===settings.questionnaire.blocks.length-1?'Завершить':'Дальше')}`);document.querySelector('#settings')?.remove();document.querySelector('#prev').onclick=()=>{recording.block--;renderLive();};document.querySelector('#next').onclick=()=>{if(recording.block<settings.questionnaire.blocks.length-1){recording.block++;renderLive();}else stopRecording();};clearInterval(recording.timer);const start=Date.parse(recording.startedAt);recording.timer=setInterval(()=>{const sec=Math.floor((Date.now()-start)/1000),el=document.querySelector('#clock');if(el)el.textContent=`${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`;},1000);}
+function stopRecording(){if(recording.busy)return;recording.busy=true;document.querySelectorAll('button').forEach(x=>x.disabled=true);recording.recorder.stop();recording.stream.getTracks().forEach(x=>x.stop());clearInterval(recording.timer);}
+function blobToBase64(blob){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result).split(',')[1]);r.onerror=reject;r.readAsDataURL(blob);});}
+function renderProgress(text,detail='Это может занять несколько минут. Не закрывайте страницу.'){shell(`<section><div class="spinner" aria-hidden="true"></div><h1>${esc(text)}</h1><p>${esc(detail)}</p><progress id="progress" aria-label="Прогресс"></progress></section>`);document.querySelector('#settings')?.remove();}
+async function finishRecording(){recording.blob=new Blob(recording.chunks,{type:(recording.mime||recording.recorder.mimeType||'audio/webm').split(';')[0]});if(recording.blob.size<512){window.removeEventListener('beforeunload',guard);return renderFailure('Запись получилась пустой. Проверьте микрофон.');}await runWorkflow();}
+async function runWorkflow(){try{renderProgress('Расшифровываю разговор');const audio=await blobToBase64(recording.blob);const transcribed=await api('/api/transcribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({audio,mimeType:recording.blob.type})},10*60*1000);renderProgress('Разбираю ответы');const segmented=await api('/api/segment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript:transcribed.transcript,questionnaire:settings.questionnaire})},120000);renderProgress('Загружаю аудио в Drive');const ext=recording.blob.type.includes('mp4')?'m4a':recording.blob.type.includes('ogg')?'ogg':'webm';const stem=`${recording.project} — ${recording.interviewee} — ${recording.startedAt.slice(0,19).replace(/[T:]/g,'-')}`;const audioName=safeFilename(stem,ext);const upload=await api('/api/upload-session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folderId:settings.folder.id,filename:audioName,mimeType:recording.blob.type,size:recording.blob.size})});const put=await fetch(upload.uploadUrl,{method:'PUT',headers:{'Content-Type':recording.blob.type},body:recording.blob});if(!put.ok)throw new Error(`Google Drive не принял аудио (${put.status})`);const audioFile=await put.json();await api('/api/verify-upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folderId:settings.folder.id,fileId:audioFile.id})});renderProgress('Сохраняю расшифровку');const markdown=buildMarkdown({project:recording.project,interviewee:recording.interviewee,startedAt:recording.startedAt,questionnaire:settings.questionnaire,transcript:transcribed.transcript,segments:segmented.segments,audioFile});const docName=safeFilename(stem,'md');await api('/api/drive/save-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folderId:settings.folder.id,filename:docName,text:markdown})});window.removeEventListener('beforeunload',guard);recording.busy=false;renderSuccess(audioName,docName);}catch(error){recording.busy=false;renderFailure(error.message,true);}}
+function renderSuccess(audioName,docName){shell(`<section><div class="result success-mark">✓</div><h1>Интервью сохранено</h1><p>В папке «${esc(settings.folder.name)}» созданы файлы:</p><ul><li>${esc(audioName)}</li><li>${esc(docName)}</li></ul></section>`,button('again','Новое интервью'));document.querySelector('#again').onclick=renderStart;}
+function renderFailure(message,retry=false){shell(`<section><div class="result error-mark">!</div><h1>Не удалось завершить</h1><p>${esc(message)}</p><div class="notice">${recording.blob?'Запись остаётся в памяти этой вкладки. Не закрывайте её до повторной отправки.':'Начните новую запись после проверки микрофона.'}</div></section>`,`${retry?button('retry','Повторить'):''}${button('again','Начать заново','secondary')}`);document.querySelector('#retry')?.addEventListener('click',runWorkflow);document.querySelector('#again').onclick=()=>{if(recording.blob&&!confirm('Удалить несохранённую запись?'))return;window.removeEventListener('beforeunload',guard);renderStart();};}
+
+function renderSettings(){shell(`<section><p class="eyebrow">Настройки</p><h1>CustDev Recorder</h1><div class="settings-list"><div><b>Google Drive</b><small>${session?esc(session.email):'Подключение не проверено'}</small><div class="row">${button('reconnect','Переподключить','secondary')}${button('logout','Выйти','danger')}</div></div><div><b>Папка</b><small>${esc(settings?.folder?.name||'Не выбрана')}</small>${button('folder','Изменить папку','secondary')}</div><div><b>Опросник</b><small>${esc(settings?.questionnaire?.title||'Не добавлен')}</small><div class="row">${button('edit','Редактировать','secondary')}${button('replace','Заменить','secondary')}</div></div><div><b>Локальные настройки</b><div class="row">${button('export','Экспорт JSON','secondary')}${button('reset','Сбросить','danger')}</div></div></div><div class="notice">Локально хранятся только название и ID папки и ваш опросник. Google-токены находятся в защищённой серверной сессии, а не в localStorage.</div></section>`,button('close','Готово'));
+  document.querySelector('#close').onclick=()=>settings?renderStart():(step=0,renderOnboarding());document.querySelector('#reconnect').onclick=()=>location.href='/api/auth/google';document.querySelector('#logout').onclick=async()=>{try{await api('/api/auth/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});session=null;announce('Вы вышли из Google');renderSettings();}catch(e){announce(e.message,true);}};document.querySelector('#folder').onclick=()=>{step=1;renderOnboarding();};document.querySelector('#edit').onclick=()=>{draft=settings.questionnaire;renderEditor(false);};document.querySelector('#replace').onclick=()=>{step=2;renderOnboarding();};document.querySelector('#export').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(settings,null,2)],{type:'application/json'}));a.download='custdev-recorder-settings.json';a.click();URL.revokeObjectURL(a.href);};document.querySelector('#reset').onclick=()=>{if(confirm('Удалить папку и опросник из этого браузера?')){localStorage.removeItem(STORAGE);settings=null;draft=null;step=session?1:0;renderOnboarding();}};
 }
 
-/* уход со страницы во время записи или заливки грозит потерей куска */
-function unloadGuard(e) { e.preventDefault(); e.returnValue = ''; return ''; }
-function setGuard(on) {
-  if (on && !state.guarding) { window.addEventListener('beforeunload', unloadGuard); state.guarding = true; }
-  else if (!on && state.guarding) { window.removeEventListener('beforeunload', unloadGuard); state.guarding = false; }
-}
-
-/* всё, что надо погасить при остановке. Идемпотентно: зовём с любого пути */
-function cleanup() {
-  if (state.tick) { clearInterval(state.tick); state.tick = null; }
-  releaseWake();
-  document.removeEventListener('visibilitychange', onVisible);
-  stopStream();
-}
-
-/* ══════════════════════════════════════════════════════════════
-   Экран 1. Имя собеседника.
-   ══════════════════════════════════════════════════════════════ */
-function renderName() {
-  app.innerHTML =
-    '<header class="top">' + MARK +
-      '<div class="topt"><b>Полевой диктофон кастдева</b><span>Custodo · проблемное интервью</span></div>' +
-    '</header>' +
-    '<main><div class="pad">' +
-      '<p class="lead">Запишем весь разговор целиком. Вопросы на экране это подсказка, чтобы не сбиться. Печатать ничего не нужно.</p>' +
-      '<label class="field"><span>С кем говорим</span>' +
-        '<input type="text" id="nm" autocomplete="off" autocapitalize="words" spellcheck="false" placeholder="Имя собеседника" value="' + esc(state.name) + '">' +
-      '</label>' +
-      '<p class="foot">Имя станет названием записи в Google Drive. Запись начнётся сразу после нажатия. Экран не будет гаснуть, пока идёт запись, а куски параллельно сохраняются в устройстве на случай сбоя. Не переключайтесь в другие приложения. Скажите собеседнику вслух, что идёт запись, первый экран об этом напомнит.</p>' +
-    '</div></main>' +
-    '<div class="bar"><button class="primary wide" id="go" disabled>Начать разговор</button></div>';
-
-  const nm = document.getElementById('nm');
-  const go = document.getElementById('go');
-  const sync = () => { state.name = nm.value.trim(); go.disabled = !state.name; };
-  nm.addEventListener('input', sync);
-  nm.addEventListener('keydown', e => { if (e.key === 'Enter' && state.name) begin(); });
-  go.addEventListener('click', () => { if (state.name) begin(); });
-  sync();
-  setTimeout(() => nm.focus(), 60);
-}
-
-/* ══════════════════════════════════════════════════════════════
-   Запись.
-   ══════════════════════════════════════════════════════════════ */
-function pickMime() {
-  const cands = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/mpeg'];
-  if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) return '';
-  for (const c of cands) { if (MediaRecorder.isTypeSupported(c)) return c; }
-  return '';
-}
-
-async function begin() {
-  if (state.busy) return;
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
-    toast('Этот браузер не умеет запись звука'); return;
-  }
-  state.busy = true;
-  // просим у браузера не вытеснять наше хранилище (лучший эффорт, тихо)
-  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
-  try {
-    state.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (e) {
-    state.busy = false;
-    toast(e && e.name === 'NotAllowedError' ? 'Нужен доступ к микрофону' : 'Микрофон недоступен');
-    return;
-  }
-  state.mime = pickMime();
-  state.chunks = [];
-  state.stopped = false;
-  try {
-    const opts = { audioBitsPerSecond: 32000 };
-    if (state.mime) opts.mimeType = state.mime;
-    state.rec = new MediaRecorder(state.stream, opts);
-    if (state.rec.mimeType) state.mime = state.rec.mimeType;   // реальный тип от рекордера
-    state.rec.ondataavailable = e => {
-      if (e.data && e.data.size) { state.chunks.push(e.data); idbAddChunk(e.data); }
-    };
-    state.rec.onstop = onStopped;
-    state.rec.onerror = () => {
-      // Ошибка рекордера может оборвать запись. Не врём «продолжаем»: останавливаем,
-      // и финализация идёт штатно через onstop, чтобы не потерять последний кусок.
-      toast('Сбой записи, сохраняю накопленное');
-      try { if (state.rec && state.rec.state === 'recording') { state.rec.stop(); return; } } catch (err) {}
-      onStopped();   // если стоп не запустить — финализируем напрямую, идемпотентно
-    };
-    state.t0 = Date.now();
-    state.uid = makeUid();
-    state.uploadTried = false;
-    // Заводим IDB-страховку ДО старта: очередь записи кусков встаёт на этот промис,
-    // поэтому очистка прошлой сессии гарантированно раньше первого нового куска.
-    state.idbChain = idbReset({ name: state.name, mime: state.mime, t0: state.t0, uid: state.uid });
-    state.idbChain.then(ok => { state.idbOk = ok; if (ok === false) toast('Резерв в устройстве недоступен, держите вкладку открытой'); });
-    state.rec.start(1000);   // режем на секундные куски, чтобы поток отдавал данные по ходу
-  } catch (e) {
-    cleanup(); state.rec = null; state.busy = false;
-    toast('Запись не запустилась'); return;
-  }
-  state.block = 0;
-  state.busy = false;
-  setGuard(true);
-  requestWake();
-  document.addEventListener('visibilitychange', onVisible);
-  renderLive();
-  startTick();
-}
-
-async function requestWake() {
-  // Уже держим lock или запрос в полёте — второй не плодим (иначе первый течёт).
-  if (state.wake || state.wakeReq || !('wakeLock' in navigator)) return;
-  state.wakeReq = true;
-  try {
-    const w = await navigator.wakeLock.request('screen');
-    // Запрос мог разрешиться уже после остановки записи: тогда сразу отпускаем,
-    // чтобы не держать экран включённым зря.
-    if (!state.rec || state.rec.state !== 'recording') { try { w.release(); } catch (e) {} return; }
-    state.wake = w;
-    // Система сама снимает lock при уходе вкладки в фон: сбрасываем ссылку,
-    // чтобы onVisible смог запросить новый при возврате.
-    w.addEventListener('release', () => { if (state.wake === w) state.wake = null; });
-  } catch (e) { /* не критично: запись живёт и без wake lock */ }
-  finally { state.wakeReq = false; }
-}
-function onVisible() {
-  if (document.visibilityState === 'visible' && state.rec && state.rec.state === 'recording'
-      && !state.wake && !state.wakeReq) requestWake();
-}
-function startTick() {
-  const paint = () => {
-    const el = document.getElementById('rectime');
-    if (!el) return;
-    const s = Math.max(0, Math.floor((Date.now() - state.t0) / 1000));
-    el.textContent = pad2(Math.floor(s / 60)) + ':' + pad2(s % 60);
-  };
-  paint();
-  state.tick = setInterval(paint, 1000);
-}
-
-function stopStream() {
-  if (state.stream) { try { state.stream.getTracks().forEach(t => t.stop()); } catch (e) {} state.stream = null; }
-}
-function releaseWake() {
-  if (state.wake) { try { state.wake.release(); } catch (e) {} state.wake = null; }
-}
-
-/* ══════════════════════════════════════════════════════════════
-   Экран 2. Суфлёр по блокам.
-   ══════════════════════════════════════════════════════════════ */
-function renderLive() {
-  const b = BLOCKS[state.block];
-  const last = state.block === BLOCKS.length - 1;
-
-  const dots = BLOCKS.map((_, i) =>
-    '<div class="dot ' + (i < state.block ? 'done' : i === state.block ? 'cur' : '') + '"></div>').join('');
-
-  const qs = b.q.map(q => '<li>' + esc(q) + '</li>').join('');
-
-  const intro = state.block === 0
-    ? '<div class="script"><b>Сказать вслух</b>' + esc(INTRO) + '</div>'
-    : '';
-
-  app.innerHTML =
-    '<header class="top">' + MARK +
-      '<div class="topt"><b>' + esc(state.name) + '</b><span>идёт запись</span></div>' +
-      '<div class="reclive"><span class="reclamp"></span><span class="rectime" id="rectime">00:00</span></div>' +
-      '<button class="endbtn" id="end">Стоп</button>' +
-    '</header>' +
-    '<main><div class="pad">' +
-      '<div class="dots">' + dots + '</div>' +
-      '<div class="blocktitle">' + esc(b.t) + '</div>' +
-      '<div class="blockidx">Блок ' + (state.block + 1) + ' из ' + BLOCKS.length + '</div>' +
-      intro +
-      '<ol class="qlist">' + qs + '</ol>' +
-    '</div></main>' +
-    '<div class="bar">' +
-      '<button class="ghost" id="back"' + (state.block === 0 ? ' disabled' : '') + '>Назад</button>' +
-      '<button class="primary" id="next">' + (last ? 'Завершить разговор' : 'Дальше') + '</button>' +
-    '</div>';
-
-  document.getElementById('end').addEventListener('click', endConversation);
-  document.getElementById('back').addEventListener('click', () => {
-    if (state.block > 0) { state.block--; renderLive(); }
-  });
-  document.getElementById('next').addEventListener('click', () => {
-    if (last) { endConversation(); return; }
-    state.block++; renderLive();
-  });
-}
-
-/* ══════════════════════════════════════════════════════════════
-   Завершение и заливка.
-   ══════════════════════════════════════════════════════════════ */
-function endConversation() {
-  if (state.busy || state.stopped) return;
-  state.busy = true;
-  try {
-    if (state.rec && state.rec.state !== 'inactive') { state.rec.stop(); return; }   // дальше onStopped
-  } catch (e) {}
-  onStopped();
-}
-
-function onStopped() {
-  if (state.stopped) return;   // ровно один раз, с любого пути остановки
-  state.stopped = true;
-  cleanup();
-  const type = state.mime || 'audio/webm';
-  state.blob = new Blob(state.chunks, { type });
-  state.busy = false;
-  if (!state.blob || state.blob.size < 1024) {
-    setGuard(false);
-    idbClear();   // пустышку в резерве не держим, иначе следующий запуск её предложит
-    renderDone(false, 'Запись пустая: звук не записался. Проверьте доступ к микрофону.', null);
-    return;
-  }
-  renderUploading();
-  uploadBlob(state.blob);
-}
-
-function ext() {
-  const m = (state.mime || '').toLowerCase();
-  if (m.indexOf('mp4') >= 0) return 'm4a';
-  if (m.indexOf('mpeg') >= 0) return 'mp3';
-  if (m.indexOf('ogg') >= 0) return 'ogg';
-  return 'webm';
-}
-function baseMime() {
-  return (state.mime || 'audio/webm').split(';')[0].trim() || 'audio/webm';
-}
-
-// Спрашиваем у resumable-сессии, сколько байт она уже приняла.
-// 200/201 -> файл целиком закоммичен; 308 -> сколько дошло (заголовок Range);
-// иначе -> сессия непригодна. Пустой PUT с "Content-Range: bytes */total".
-async function probeSession(url, total) {
-  const r = await fetchT(url, {
-    method: 'PUT',
-    headers: { 'Content-Range': 'bytes */' + total }
-  }, 30000);
-  if (r.status === 200 || r.status === 201) return { done: true };
-  if (r.status === 308) {
-    // Google отдаёт Range по CORS. Если вдруг скрыт — offset 0 означает полный
-    // повторный PUT bytes 0..N-1/N, который сессия штатно принимает и финализирует.
-    let offset = 0;
-    const range = r.headers.get('range');   // "bytes=0-N"
-    if (range) { const m = range.match(/-(\d+)\s*$/); if (m) offset = parseInt(m[1], 10) + 1; }
-    return { done: offset >= total, offset: offset };
-  }
-  return { fatal: true };
-}
-
-// Дозаливаем хвост с известного смещения.
-async function resumeFrom(url, blob, offset) {
-  const total = blob.size;
-  const r = await fetchT(url, {
-    method: 'PUT',
-    headers: { 'Content-Range': 'bytes ' + offset + '-' + (total - 1) + '/' + total },
-    body: blob.slice(offset)
-  }, 15 * 60 * 1000);
-  return r.status === 200 || r.status === 201;   // коммит только по 200/201
-}
-
-// Первый PUT упал или ответ потерялся. Прежде чем кричать об ошибке — выясняем
-// у Google, дошёл ли файл. Часто он уже в Drive, а до нас не долетел лишь ответ.
-async function verifyOrResume(url, blob) {
-  const total = blob.size;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    let st;
-    try { st = await probeSession(url, total); }
-    catch (e) { return false; }        // сессию не достучаться -> реальный обрыв
-    if (st.fatal) return false;
-    if (st.done) return true;          // всё принято, коммит подтверждён
-    try { if (await resumeFrom(url, blob, st.offset || 0)) return true; }
-    catch (e) { /* повторим probe на следующем витке */ }
-  }
-  try { const st = await probeSession(url, total); return !!st.done; }
-  catch (e) { return false; }
-}
-
-// Успешная заливка: сперва дождаться недописанных кусков и стереть резерв в
-// устройстве, и только потом рапортовать успех и снимать защиту от закрытия.
-// Иначе быстрое закрытие оставит копию и вызовет ложное восстановление и дубль.
-async function finishOk(finalName) {
-  try { await state.idbChain; } catch (e) {}
-  // Сначала штампуем «залито» (пережмёт ложное восстановление, даже если стереть
-  // не выйдет), затем чистим резерв. Успех рапортуем независимо от исхода чистки.
-  try { await idbMarkDone(); } catch (e) {}
-  try { await idbClear(); } catch (e) {}
-  setGuard(false);
-  renderDone(true, finalName, null);
-}
-
-async function uploadBlob(blob) {
-  const name = 'Кастдев. ' + state.name + '. ' + stamp(state.t0 || Date.now()) + '.' + ext();
-  const mime = baseMime();
-  setGuard(true);   // держим предупреждение до самого конца заливки
-  // Повтор после прошлой попытки: сперва спросим Drive по uid, не лёг ли файл уже.
-  // Иначе новая сессия зальёт дубль, если предыдущий PUT на деле закоммитился.
-  if (state.uploadTried && state.uid && await verifyUploaded(state.uid, name, blob.size)) {
-    await finishOk(name);
-    return;
-  }
-  state.uploadTried = true;
-  let uploadUrl = null;
-  let finalName = name;
-  try {
-    const sr = await fetchT('/api/upload-session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, mime, size: blob.size, uid: state.uid })
-    }, 20000);
-    if (!sr.ok) throw new Error('session ' + sr.status);
-    const sj = await sr.json();
-    if (!sj.uploadUrl) throw new Error('no url');
-    uploadUrl = sj.uploadUrl;
-    if (sj.name && typeof sj.name === 'string') finalName = sj.name;   // серверное имя главнее
-
-    const pr = await fetchT(uploadUrl, {
-      method: 'PUT',
-      headers: { 'Content-Type': mime },
-      body: blob
-    }, 15 * 60 * 1000);   // до 15 минут на большой файл
-    // Коммит только по 200/201. Любой иной ответ (в т.ч. неожиданный 2xx) —
-    // не верим на слово, идём переспрашивать сессию.
-    if (pr.status === 200 || pr.status === 201) {
-      await finishOk(finalName);
-      return;
-    }
-    throw new Error('put ' + pr.status);
-  } catch (e) {
-    // PUT оборвался или ответ потерялся. Если сессию успели создать —
-    // спросим Google, дошёл ли файл, и при нужде дольём хвост, а не пугаем зря.
-    if (uploadUrl) {
-      try {
-        if (await verifyOrResume(uploadUrl, blob)) {
-          await finishOk(finalName);
-          return;
-        }
-      } catch (e2) { console.warn('verify', e2 && e2.message || e2); }
-    }
-    // Последний арбитр: спросим сервер по uid, не лёг ли файл в Drive несмотря на
-    // потерянный ответ. Часто он уже там, а мы зря собрались пугать ошибкой.
-    if (await verifyUploaded(state.uid, finalName, blob.size)) {
-      await finishOk(finalName);
-      return;
-    }
-    console.warn('upload', e && e.message || e);
-    // Блоб цел, даём повторить, страницу закрывать всё ещё нельзя.
-    renderDone(false, 'Не удалось загрузить запись. Проверьте связь и попробуйте ещё раз.', blob);
-  }
-}
-
-/* ── экраны заливки / итога ─────────────────────────────────── */
-function renderUploading() {
-  app.innerHTML =
-    '<header class="top">' + MARK +
-      '<div class="topt"><b>' + esc(state.name) + '</b><span>загрузка записи</span></div>' +
-    '</header>' +
-    '<main><div class="pad">' +
-      '<p class="lead">Отправляю запись в Google Drive. Не закрывайте страницу.</p>' +
-    '</div></main>' +
-    '<div class="bar"><button class="primary wide" disabled>' +
-      '<span class="uploading"><span class="spin"></span>Загрузка</span></button></div>';
-}
-
-function renderDone(ok, msg, retryBlob) {
-  // Успех уже прошёл через finishOk (там ждём очередь и чистим резерв), тут только UI.
-  const cls = ok ? 'donewrap' : 'donewrap doneerr';
-  const head = ok ? 'Запись загружена' : 'Не отправилось';
-  // Честно про сохранность: если резерв в устройстве отвалился, запись держится
-  // только в памяти этой вкладки, и закрывать её нельзя.
-  const safe = state.idbOk === false
-    ? ' Запись держится в этой вкладке, не закрывайте её. Нажмите «Повторить», чтобы отправить снова.'
-    : ' Запись цела в устройстве. Нажмите «Повторить», чтобы отправить снова.';
-  const body = ok
-    ? 'Файл «' + esc(msg) + '» лежит в папке кастдева. Разбор с вердиктом придёт следом.'
-    : esc(msg) + safe;
-
-  let bar;
-  if (ok) {
-    bar = '<button class="primary wide" id="again">Новый разговор</button>';
-  } else if (retryBlob) {
-    bar = '<button class="ghost" id="again">Заново</button>' +
-          '<button class="primary" id="retry">Повторить</button>';
-  } else {
-    bar = '<button class="primary wide" id="again">Новый разговор</button>';
-  }
-
-  app.innerHTML =
-    '<header class="top">' + MARK +
-      '<div class="topt"><b>' + esc(state.name) + '</b><span>' + (ok ? 'готово' : 'ошибка') + '</span></div>' +
-    '</header>' +
-    '<main><div class="pad">' +
-      '<div class="' + cls + '"><div class="donemark"></div>' +
-        '<div class="doneh">' + head + '</div>' +
-        '<div class="donep">' + body + '</div>' +
-      '</div>' +
-    '</div></main>' +
-    '<div class="bar">' + bar + '</div>';
-
-  const again = document.getElementById('again');
-  if (again) again.addEventListener('click', () => {
-    // «Заново» на экране ошибки выбрасывает единственную копию — переспросим.
-    if (!ok && retryBlob && !confirm('Удалить эту запись и начать заново? Она нигде не сохранится.')) return;
-    setGuard(false); reset();
-  });
-  const retry = document.getElementById('retry');
-  if (retry && retryBlob) retry.addEventListener('click', () => { renderUploading(); uploadBlob(retryBlob); });
-}
-
-async function reset() {
-  setGuard(false);
-  await idbClear();    // ДОЖДАТЬСЯ стирания резерва: иначе отложенная чистка может
-                       // снести уже начатую следующую запись (её мету/куски)
-  state.name = '';
-  state.block = 0;
-  state.rec = null;
-  state.chunks = [];
-  state.mime = '';
-  state.blob = null;
-  state.t0 = 0;
-  state.uid = '';
-  state.uploadTried = false;
-  state.busy = false;
-  state.stopped = false;
-  state.idbChain = null;
-  state.idbOk = true;
-  renderName();
-}
-
-/* ══════════════════════════════════════════════════════════════
-   Восстановление: нашлась незагруженная запись прошлой сессии.
-   ══════════════════════════════════════════════════════════════ */
-function renderRecover(rec) {
-  const mime = (rec.meta && rec.meta.mime) || 'audio/webm';
-  const name = (rec.meta && rec.meta.name) || 'без имени';
-  const blob = new Blob(rec.blobs, { type: mime });
-  const mb = blob.size / (1024 * 1024);
-  const sizeStr = mb >= 1 ? mb.toFixed(1) + ' МБ' : Math.max(1, Math.round(blob.size / 1024)) + ' КБ';
-  state.name = name;
-  state.mime = mime;
-  // Имя файла при заливке считается от t0 — берём исходное время записи, а не «сейчас».
-  state.t0 = (rec.meta && rec.meta.t0) || Date.now();
-  // uid прошлой записи (если был): по нему сервер точно опознает файл при заливке и проверке.
-  state.uid = (rec.meta && rec.meta.uid) || '';
-  // Восстановленную запись считаем «уже пытались залить»: она могла закоммититься
-  // до гибели вкладки. Поэтому перед новой заливкой uploadBlob сперва спросит Drive
-  // по uid и не создаст дубль, если файл там уже есть.
-  state.uploadTried = true;
-
-  app.innerHTML =
-    '<header class="top">' + MARK +
-      '<div class="topt"><b>' + esc(name) + '</b><span>незагруженная запись</span></div>' +
-    '</header>' +
-    '<main><div class="pad">' +
-      '<div class="donewrap"><div class="donemark"></div>' +
-        '<div class="doneh">Нашлась незагруженная запись</div>' +
-        '<div class="donep">Разговор с «' + esc(name) + '» сохранён в этом устройстве (' + sizeStr +
-          '), но не отправился. Можно отправить его сейчас.</div>' +
-      '</div>' +
-    '</div></main>' +
-    '<div class="bar">' +
-      '<button class="ghost" id="rdel">Удалить</button>' +
-      '<button class="primary" id="rsend">Отправить</button>' +
-    '</div>';
-
-  document.getElementById('rsend').addEventListener('click', () => { renderUploading(); uploadBlob(blob); });
-  document.getElementById('rdel').addEventListener('click', async () => {
-    if (!confirm('Удалить незавершённую запись без отправки?')) return;
-    const cleared = await idbClear();
-    if (!cleared) { toast('Не удалось стереть запись из устройства'); return; }
-    reset();
-  });
-}
-
-/* ── старт ──────────────────────────────────────────────────── */
-// Восстановление в приоритете: сначала смотрим, нет ли недозалитой записи,
-// и только если её нет — показываем обычный экран имени. Иначе экран имени
-// мигнёт и перескочит на восстановление (гонка рендеров).
-(async () => {
-  let rec = null;
-  try { rec = await idbLoad(); } catch (e) {}
-  if (rec) renderRecover(rec);
-  else renderName();
-})();
+start().catch(error=>{announce(error.message,true);renderAuth();});
