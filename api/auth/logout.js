@@ -1,0 +1,2 @@
+import { serializeCookie,cookieOptions } from '../../lib/cookies.js'; import { assertMethod,assertSameOrigin,sendError,sendJson } from '../../lib/http.js';
+export function createLogoutHandler(){return async(req,res)=>{try{assertMethod(req,'POST');assertSameOrigin(req);res.setHeader('Set-Cookie',serializeCookie('session','',{...cookieOptions(),maxAge:0}));sendJson(res,200,{ok:true});}catch(e){sendError(res,e)}}} export default createLogoutHandler();
