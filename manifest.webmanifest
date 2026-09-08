@@ -1,0 +1,16 @@
+{
+  "name": "E-Auditor: кастдев собственника",
+  "short_name": "Кастдев",
+  "description": "Полевой опросник кастдева для собственника: три вопроса о контроле в компании, разбор последнего случая потери, вердикт по встрече и выгрузка строкой в таблицу валидации.",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d1614",
+  "theme_color": "#0d1614",
+  "icons": [
+    { "src": "icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

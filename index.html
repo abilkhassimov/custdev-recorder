@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>E-Auditor: полевой диктофон кастдева</title>
+<meta name="description" content="Суфлёр вопросов и диктофон для проблемного интервью с собственником. Запись всего разговора уходит в Drive, разбор с вердиктом приходит следом.">
+<meta name="theme-color" content="#0d1614">
+<meta name="robots" content="noindex">
+
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Кастдев">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="manifest" href="manifest.webmanifest">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="E-Auditor">
+<meta property="og:locale" content="ru_RU">
+<meta property="og:title" content="E-Auditor: полевой диктофон кастдева">
+<meta property="og:description" content="Суфлёр вопросов и диктофон проблемного интервью. Запись уходит в Drive, разбор с вердиктом приходит следом.">
+<meta property="og:url" content="https://custodo-interview.vercel.app/">
+<meta property="og:image" content="https://custodo-interview.vercel.app/og.png?v=20260902">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="E-Auditor: полевой диктофон кастдева">
+<meta name="twitter:description" content="Суфлёр вопросов и диктофон проблемного интервью с собственником.">
+<meta name="twitter:image" content="https://custodo-interview.vercel.app/og.png?v=20260902">
+
+<link rel="preload" as="font" type="font/woff2" href="fonts/unbounded-500-cyrillic.woff2" crossorigin>
+<link rel="preload" as="font" type="font/woff2" href="fonts/manrope-400-cyrillic.woff2" crossorigin>
+<link rel="stylesheet" href="fonts.css">
+<style>
+:root{
+  --bg:      oklch(0.155 0.013 172);
+  --bg-deep: oklch(0.108 0.011 172);
+  --panel:   oklch(0.205 0.015 172);
+  --panel-2: oklch(0.245 0.016 172);
+  --fg:      oklch(0.965 0.005 100);
+  --fg-2:    oklch(0.735 0.014 172);
+  --fg-3:    oklch(0.545 0.014 172);
+  --brass:   oklch(0.815 0.118 82);
+  --jade:    oklch(0.755 0.125 172);
+  --clay:    oklch(0.685 0.16 38);
+  --hair:    oklch(0.99 0.01 172 / 0.13);
+  --hair-s:  oklch(0.99 0.01 172 / 0.07);
+  --display: 'Unbounded', system-ui, sans-serif;
+  --body:    'Manrope', system-ui, -apple-system, sans-serif;
+  --mono:    'JetBrains Mono', ui-monospace, monospace;
+}
+*{box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent}
+html{background:var(--bg-deep)}
+body{
+  height:100dvh; display:flex; flex-direction:column;
+  background:var(--bg); color:var(--fg); font-family:var(--body);
+  font-size:16px; line-height:1.5;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  overscroll-behavior:none;
+}
+#app{display:flex; flex-direction:column; flex:1; min-height:0; width:100%; max-width:640px; margin:0 auto}
+button,input{font:inherit; color:inherit}
+button{background:none; border:none; cursor:pointer}
+.hide{display:none !important}
+
+/* ── шапка ── */
+.top{
+  display:flex; align-items:center; gap:12px; flex:0 0 auto;
+  padding:calc(env(safe-area-inset-top) + 14px) 18px 14px;
+  border-bottom:1px solid var(--hair); background:var(--bg);
+}
+.mark{width:26px; height:26px; flex:0 0 auto}
+.topt{display:flex; flex-direction:column; min-width:0; flex:1}
+.topt b{font-family:var(--display); font-weight:500; font-size:15px; letter-spacing:-.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.topt span{font-family:var(--mono); font-size:10.5px; letter-spacing:.11em; text-transform:uppercase; color:var(--fg-3); margin-top:3px}
+.reclive{display:flex; align-items:center; gap:8px; flex:0 0 auto}
+.reclamp{width:10px; height:10px; border-radius:50%; background:var(--clay); animation:pulse 1.1s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1; transform:scale(1)} 50%{opacity:.3; transform:scale(.6)}}
+.rectime{font-family:var(--mono); font-size:14px; color:var(--fg); font-variant-numeric:tabular-nums}
+.endbtn{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--clay); border:1px solid oklch(0.685 0.16 38 / .4); border-radius:2px; padding:8px 11px; flex:0 0 auto;
+}
+.endbtn:active{background:oklch(0.685 0.16 38 / .12)}
+
+/* ── тело ── */
+main{flex:1; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch}
+.pad{padding:22px 18px 28px}
+.lead{color:var(--fg-2); font-size:15.5px; text-wrap:pretty; margin-bottom:24px}
+
+/* ── стартовый экран ── */
+.field span{display:block; font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--fg-3); margin-bottom:9px}
+input[type=text]{
+  width:100%; background:var(--bg-deep); border:1px solid var(--hair);
+  padding:15px 15px; font-size:17px; border-radius:2px; color:var(--fg);
+}
+input[type=text]:focus{outline:none; border-color:var(--brass)}
+::placeholder{color:var(--fg-3)}
+.foot{color:var(--fg-3); font-size:12.5px; line-height:1.6; margin-top:22px; text-wrap:pretty}
+
+/* ── экран интервью ── */
+.dots{display:flex; gap:6px; margin-bottom:18px}
+.dot{width:100%; height:3px; background:var(--hair-s)}
+.dot.done{background:var(--fg-3)}
+.dot.cur{background:var(--brass)}
+.blocktitle{font-family:var(--display); font-weight:500; font-size:22px; letter-spacing:-.02em; margin-bottom:4px; text-wrap:pretty}
+.blockidx{font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--fg-3); margin-bottom:20px}
+.script{
+  font-size:15.5px; line-height:1.5; color:var(--fg); text-wrap:pretty;
+  padding:15px 16px; margin-bottom:22px;
+  border:1px solid oklch(0.755 0.125 172 / .32); background:oklch(0.755 0.125 172 / .05);
+}
+.script b{font-family:var(--mono); display:block; font-size:10px; font-weight:500; letter-spacing:.13em; text-transform:uppercase; color:var(--jade); margin-bottom:7px}
+.qlist{list-style:none; counter-reset:q; display:flex; flex-direction:column}
+.qlist li{
+  counter-increment:q; position:relative; padding:16px 0 16px 34px;
+  border-bottom:1px solid var(--hair); font-size:17.5px; line-height:1.4; letter-spacing:-.01em; text-wrap:pretty;
+}
+.qlist li:first-child{border-top:1px solid var(--hair)}
+.qlist li::before{
+  content:counter(q); position:absolute; left:0; top:19px;
+  font-family:var(--mono); font-size:12px; color:var(--brass);
+}
+
+/* ── экран готово ── */
+.donewrap{display:flex; flex-direction:column; align-items:flex-start; gap:6px}
+.donemark{width:44px; height:44px; border:2px solid var(--jade); border-radius:50%; display:grid; place-items:center; margin-bottom:12px}
+.donemark::after{content:''; width:11px; height:20px; border:solid var(--jade); border-width:0 3px 3px 0; transform:rotate(43deg) translate(-1px,-2px)}
+.doneh{font-family:var(--display); font-weight:500; font-size:21px; letter-spacing:-.015em}
+.donep{color:var(--fg-2); font-size:15px; text-wrap:pretty; margin-top:4px}
+.doneerr .donemark{border-color:var(--clay)}
+.doneerr .donemark::after{content:'!'; border:0; font-family:var(--display); color:var(--clay); font-size:26px; transform:none}
+.doneerr .doneh{color:var(--clay)}
+
+/* ── нижняя панель ── */
+.bar{
+  flex:0 0 auto; display:flex; gap:10px; padding:12px 18px calc(env(safe-area-inset-bottom) + 14px);
+  border-top:1px solid var(--hair); background:var(--bg);
+}
+.ghost{
+  font-family:var(--mono); font-size:11px; letter-spacing:.12em; text-transform:uppercase;
+  color:var(--fg-2); border:1px solid var(--hair); border-radius:2px; padding:0 18px; min-height:52px; flex:0 0 34%;
+}
+.ghost:active{background:var(--hair-s)}
+.ghost[disabled]{opacity:.3}
+.primary{
+  flex:1; min-height:52px; background:var(--brass); color:oklch(0.16 0.02 82);
+  font-family:var(--display); font-weight:500; font-size:15px; letter-spacing:-.01em; border-radius:2px; padding:0 18px;
+}
+.primary:active{background:oklch(0.74 0.11 82)}
+.primary[disabled]{opacity:.4}
+.primary.wide{width:100%}
+.uploading{display:flex; align-items:center; justify-content:center; gap:10px; color:oklch(0.16 0.02 82)}
+.spin{width:15px; height:15px; border:2px solid oklch(0.16 0.02 82 / .35); border-top-color:oklch(0.16 0.02 82); border-radius:50%; animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── тост ── */
+.toast{
+  position:fixed; left:50%; bottom:calc(env(safe-area-inset-bottom) + 84px); transform:translateX(-50%) translateY(12px);
+  background:var(--panel-2); border:1px solid var(--hair); color:var(--fg);
+  font-family:var(--mono); font-size:12px; padding:11px 16px; border-radius:2px;
+  opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; z-index:20; max-width:88vw; text-align:center;
+}
+.toast.on{opacity:1; transform:translateX(-50%) translateY(0)}
+
+@media (min-width:560px){
+  .blocktitle{font-size:26px}
+  .qlist li{font-size:19px}
+  .pad{padding:26px 24px 32px}
+  .top,.bar{padding-left:24px; padding-right:24px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none !important} .reclamp,.spin{animation:none !important}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="toast" id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
