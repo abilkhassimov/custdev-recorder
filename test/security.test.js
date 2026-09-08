@@ -15,7 +15,11 @@ test('session crypto roundtrips without exposing plaintext', () => {
 
 test('session crypto rejects tampering and expiry', () => {
   const value = sealSession({ refreshToken: 'r', email: 'a@b.co' }, secret, { now: 1000, ttl: 10 });
-  assert.throws(() => openSession(value.slice(0, -1) + (value.endsWith('a') ? 'b' : 'a'), secret, { now: 1001 }), /Invalid session/);
+  const parts = value.split('.');
+  const ciphertext = Buffer.from(parts[1], 'base64url');
+  ciphertext[0] ^= 1;
+  const tampered = [parts[0], ciphertext.toString('base64url'), parts[2]].join('.');
+  assert.throws(() => openSession(tampered, secret, { now: 1001 }), /Invalid session/);
   assert.throws(() => openSession(value, secret, { now: 1011 }), /expired/i);
 });
 
