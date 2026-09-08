@@ -2,9 +2,16 @@
   "name": "custdev-recorder",
   "private": true,
   "type": "module",
-  "engines": { "node": "22.x" },
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "test": "node --test",
-    "check": "node --check api/auth/google.js && node --check api/auth/callback.js && node --check api/auth/session.js && node --check api/auth/logout.js && node --check api/google/access-token.js && node --check api/upload-session.js && node --check api/verify-upload.js && node --check api/drive/save-text.js && node --check lib/security.js && node --check lib/cookies.js && node --check lib/env.js && node --check lib/google.js && node --check lib/http.js && node --check lib/session.js && node --check lib/validation.js"
+    "check": "node --check api/auth/google.js && node --check api/auth/callback.js && node --check api/auth/session.js && node --check api/auth/logout.js && node --check api/google/access-token.js && node --check api/upload-session.js && node --check api/verify-upload.js && node --check api/drive/save-text.js && node --check api/questionnaire/parse.js && node --check api/transcribe.js && node --check api/segment.js && node --check lib/security.js && node --check lib/cookies.js && node --check lib/env.js && node --check lib/google.js && node --check lib/http.js && node --check lib/session.js && node --check lib/validation.js && node --check lib/ai.js && node --check lib/documents.js"
+  },
+  "dependencies": {
+    "busboy": "^1.6.0",
+    "mammoth": "^1.12.2",
+    "pdf-parse": "^2.4.5"
   }
 }
