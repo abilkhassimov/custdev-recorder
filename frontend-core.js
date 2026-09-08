@@ -3,6 +3,13 @@ let sequence = 0;
 const id = prefix => `${prefix}_${Date.now().toString(36)}_${(++sequence).toString(36)}`;
 const clone = value => JSON.parse(JSON.stringify(value));
 
+export function canRecord(session, settings) { return Boolean(session?.email && settings?.folder?.id && settings?.questionnaire?.blocks?.length); }
+export function batchBlobs(chunks, mimeType, maxBytes = 2_500_000) {
+  const batches=[]; let current=[],size=0;
+  for(const chunk of chunks){if(!(chunk instanceof Blob)||chunk.size>maxBytes)throw new Error('Recording chunk exceeds safe upload limit');if(size+chunk.size>maxBytes&&current.length){batches.push(new Blob(current,{type:mimeType}));current=[];size=0;}current.push(chunk);size+=chunk.size;}
+  if(current.length)batches.push(new Blob(current,{type:mimeType})); return batches;
+}
+
 export function validateConfig(value) {
   if (!value || typeof value !== 'object') throw new Error('Настройки Google Picker недоступны');
   if (Object.keys(value).some(key => /secret|token|password/i.test(key))) throw new Error('Публичные настройки не должны содержать секреты');

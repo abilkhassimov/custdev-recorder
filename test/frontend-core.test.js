@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   validateConfig, normalizeQuestionnaire, addBlock, addQuestion, deleteBlock,
   deleteQuestion, moveBlock, moveQuestion, updateBlock, updateQuestion,
-  safeFilename, buildMarkdown, migrateState
+  safeFilename, buildMarkdown, migrateState, batchBlobs, canRecord
 } from '../frontend-core.js';
 
 const sample = () => ({ title: 'Исследование', blocks: [
@@ -66,4 +66,18 @@ test('migrateState accepts current/legacy settings, strips tokens, and rejects b
   assert.deepEqual(legacy.folder, { id: 'abc_DEF-1234567890', name: 'Drive' });
   assert.equal(migrateState({ folderId: '../bad', questionnaire: sample() }), null);
   assert.equal(migrateState(null), null);
+});
+
+test('recording batches stay below the JSON-safe binary limit without losing order', async () => {
+  const chunks=[new Blob([Buffer.alloc(700_000,1)]),new Blob([Buffer.alloc(700_000,2)]),new Blob([Buffer.alloc(700_000,3)]),new Blob([Buffer.alloc(700_000,4)])];
+  const batches=batchBlobs(chunks,'audio/webm',2_000_000);
+  assert.deepEqual(batches.map(x=>x.size),[1_400_000,1_400_000]);
+  assert.equal(Buffer.concat(await Promise.all(batches.map(async x=>Buffer.from(await x.arrayBuffer())))).length,2_800_000);
+  assert.throws(()=>batchBlobs([new Blob([Buffer.alloc(2_000_001)])],'audio/webm',2_000_000),/chunk/i);
+});
+
+test('recorder availability requires both current session and valid local settings', () => {
+  assert.equal(canRecord({email:'a@example.com'}, {folder:{id:'x'},questionnaire:{blocks:[{}]}}),true);
+  assert.equal(canRecord(null, {folder:{id:'x'},questionnaire:{blocks:[{}]}}),false);
+  assert.equal(canRecord({email:'a@example.com'}, null),false);
 });
