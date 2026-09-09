@@ -8,6 +8,7 @@ When you use the app:
 
 - your Google account email and OAuth credentials are processed to connect Google Drive;
 - the selected Drive folder ID/name and questionnaire are stored in your browser;
+- your own Gemini API key is stored only in this tab's `sessionStorage`, sent to the same-origin backend in a request header, and forwarded only to Google Gemini; it is not stored by the application server;
 - questionnaire files or pasted questionnaire text are sent to the deployment backend and then to **Google Gemini** for conversion into structured questions;
 - microphone audio is held in the open browser tab and sent in chunks to the deployment backend and then to **Google Gemini** for transcription;
 - the resulting transcript and questionnaire are sent to **Google Gemini** to map interview answers to questions;
@@ -23,13 +24,14 @@ The app uses first-party, strictly functional cookies:
 - `oauth_state`: an HttpOnly, SameSite=Lax OAuth state/PKCE cookie lasting up to five minutes;
 - `session`: an encrypted and authenticated HttpOnly, SameSite=Lax cookie containing the Google refresh token and account email, lasting up to 30 days. It is marked Secure in production.
 
-The browser stores `custdev-recorder-settings` in `localStorage`. It contains the selected folder ID/name and questionnaire. It does **not** contain Google tokens. The app does not include advertising or analytics cookies.
+The browser stores `custdev-recorder-settings` in `localStorage`. It contains the selected folder ID/name and questionnaire. It does **not** contain Google tokens or the Gemini API key. The Gemini key is kept separately in `sessionStorage` and is cleared when the tab/browser session closes; Settings lets you replace or clear it sooner. It is never intentionally placed in cookies, IndexedDB, settings exports, Markdown, Drive files, or logs. The app does not include advertising or analytics cookies.
 
 ## Storage, retention, and deletion
 
 CustDev Recorder has no application database. Backend functions process request data transiently and the source code does not intentionally persist questionnaire content, audio, transcripts, or tokens to an application datastore. However, deployment and external providers may retain request data or logs under their own configurations and terms.
 
 - Local settings remain until you use **Settings → Reset**, clear site data, or remove them through browser controls. Exported settings JSON remains wherever you saved it.
+- The Gemini API key remains only for the current tab/browser session. Closing the tab/session or choosing **Delete key** removes it; the deployment does not provide account-backed recovery.
 - The session cookie remains for up to 30 days unless you sign out or clear cookies. Signing out clears the local cookie; it does not necessarily revoke Google's grant. Revoke access from your Google Account's third-party connections to invalidate authorization.
 - An unfinished recording exists only in memory in the open tab and is lost when the tab reloads/closes. On success, the audio and Markdown persist in your Google Drive according to your Drive retention rules.
 - Delete saved audio/Markdown through Google Drive (and empty Trash if immediate permanent deletion is required). The app does not remotely delete those files when you reset settings or sign out.
@@ -37,7 +39,7 @@ CustDev Recorder has no application database. Backend functions process request 
 
 ## Data sharing and transfers
 
-Data is disclosed to Google services (OAuth, Picker, Drive, and Gemini/Generative Language API) and to the deployment hosting provider (typically Vercel) as needed to provide the service. Their infrastructure may process data in other countries. The open-source project does not sell data and contains no ad or analytics integration.
+Data is disclosed to Google services (OAuth, Picker, Drive, and Gemini/Generative Language API) and to the deployment hosting provider (typically Vercel) as needed to provide the service. Gemini calls use the user's key and therefore consume that user's quota and are governed by their Google account/project terms; the key passes transiently through the hosting provider and must be treated as a secret. Their infrastructure may process data in other countries. The open-source project does not sell data and contains no ad or analytics integration.
 
 ## Security and user choices
 

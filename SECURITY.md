@@ -21,3 +21,7 @@ Do not send OAuth credentials, API keys, session cookies, personal data, or inte
 ## Deployment responsibility
 
 Operators control their Google Cloud project, Vercel environment, credentials, privacy disclosures, access controls, logs, quotas, and legal compliance. A vulnerability in a particular deployment may need to be reported to that operator as well as upstream.
+
+## Gemini BYOK boundary
+
+Each user supplies a Google Gemini API key. The browser keeps it only in `sessionStorage` and sends it in `X-Gemini-API-Key` to authenticated, same-origin AI endpoints. Those endpoints validate its format, use it only for the current request, and forward it only to Google's Generative Language API. There is no operator-key fallback and a server-side Gemini key is unsupported configuration. Applications and operators must not log request headers or full upstream URLs, because either can expose the key. Users should restrict the key where possible, monitor quota, rotate it after suspected exposure, and clear it from Settings on shared devices.

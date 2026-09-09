@@ -3,7 +3,9 @@ let sequence = 0;
 const id = prefix => `${prefix}_${Date.now().toString(36)}_${(++sequence).toString(36)}`;
 const clone = value => JSON.parse(JSON.stringify(value));
 
-export function canRecord(session, settings) { return Boolean(session?.email && settings?.folder?.id && settings?.questionnaire?.blocks?.length); }
+export function isGeminiApiKey(value) { return typeof value==='string' && /^AIza[A-Za-z0-9_-]{32,96}$/.test(value); }
+export function geminiHeaders(value) { if(!isGeminiApiKey(value))throw new Error('Укажите действительный ключ Google Gemini API'); return {'X-Gemini-API-Key':value}; }
+export function canRecord(session, settings, geminiApiKey) { return Boolean(session?.email && settings?.folder?.id && settings?.questionnaire?.blocks?.length && isGeminiApiKey(geminiApiKey)); }
 export function batchBlobs(chunks, mimeType, maxBytes = 2_500_000) {
   const batches=[]; let current=[],size=0;
   for(const chunk of chunks){if(!(chunk instanceof Blob)||chunk.size>maxBytes)throw new Error('Recording chunk exceeds safe upload limit');if(size+chunk.size>maxBytes&&current.length){batches.push(new Blob(current,{type:mimeType}));current=[];size=0;}current.push(chunk);size+=chunk.size;}

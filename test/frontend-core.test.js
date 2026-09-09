@@ -76,8 +76,26 @@ test('recording batches stay below the JSON-safe binary limit without losing ord
   assert.throws(()=>batchBlobs([new Blob([Buffer.alloc(2_000_001)])],'audio/webm',2_000_000),/chunk/i);
 });
 
-test('recorder availability requires both current session and valid local settings', () => {
-  assert.equal(canRecord({email:'a@example.com'}, {folder:{id:'x'},questionnaire:{blocks:[{}]}}),true);
-  assert.equal(canRecord(null, {folder:{id:'x'},questionnaire:{blocks:[{}]}}),false);
-  assert.equal(canRecord({email:'a@example.com'}, null),false);
+test('recorder availability requires session, settings, and a current valid BYOK key', () => {
+  const key=`AIza${'a'.repeat(35)}`;
+  assert.equal(canRecord({email:'a@example.com'}, {folder:{id:'x'},questionnaire:{blocks:[{}]}},key),true);
+  assert.equal(canRecord({email:'a@example.com'}, {folder:{id:'x'},questionnaire:{blocks:[{}]}},null),false);
+  assert.equal(canRecord({email:'a@example.com'}, {folder:{id:'x'},questionnaire:{blocks:[{}]}},'invalid'),false);
+  assert.equal(canRecord(null, {folder:{id:'x'},questionnaire:{blocks:[{}]}},key),false);
+  assert.equal(canRecord({email:'a@example.com'}, null,key),false);
+});
+
+test('BYOK request headers accept only a conservative Google API key format', async () => {
+  const { geminiHeaders, isGeminiApiKey } = await import('../frontend-core.js');
+  const key=`AIza${'z'.repeat(35)}`;
+  assert.equal(isGeminiApiKey(key),true); assert.equal(isGeminiApiKey('bad key'),false);
+  assert.deepEqual(geminiHeaders(key),{'X-Gemini-API-Key':key});
+  assert.throws(()=>geminiHeaders('invalid'),/Gemini/);
+});
+
+test('migrated and exported nonsecret state cannot retain a Gemini key', () => {
+  const key=`AIza${'s'.repeat(35)}`;
+  const state=migrateState({version:2,folder:{id:'abc_DEF-1234567890',name:'Drive'},questionnaire:sample(),geminiApiKey:key});
+  assert.equal(JSON.stringify(state).includes(key),false);
+  assert.equal(state.geminiApiKey,undefined);
 });

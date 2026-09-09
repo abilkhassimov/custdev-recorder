@@ -1,6 +1,6 @@
 # Testing
 
-The automated suite uses Node's built-in test runner and mocked Google/Gemini boundaries. It does not require secrets or network access.
+The automated suite uses Node's built-in test runner and mocked Google/Gemini boundaries. It does not require secrets or network access. BYOK coverage verifies missing/invalid-key rejection before provider calls, concurrent request isolation, ignored server key configuration, session-key UI readiness, and exclusion from persistent/exported state and errors.
 
 ## Verified commands
 
@@ -35,7 +35,7 @@ After configuring dedicated test credentials in `.env.local`:
 npx vercel dev --listen 3000
 ```
 
-At <http://localhost:3000>, use non-sensitive test data to check sign-in, folder selection, questionnaire import/editing, microphone denial and approval paths, a short recording, retry behavior, and creation of both Drive files. Delete the test files afterward.
+At <http://localhost:3000>, use non-sensitive test data to check sign-in, folder selection, entry/replacement/removal of a disposable Gemini key, questionnaire import/editing, microphone denial and approval paths, a short recording, retry behavior, and creation of both Drive files. Confirm closing the tab requires the key again while preserving nonsecret folder/questionnaire settings, and inspect exports to ensure the key is absent. Delete the test files afterward.
 
 Live testing consumes provider quota and sends questionnaire/audio/transcript data to Google. It must be performed only with consented, disposable data. **No live Google end-to-end result or OAuth verification is asserted by this repository documentation.**
 
