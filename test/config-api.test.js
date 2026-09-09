@@ -7,7 +7,7 @@ function response() {
 }
 
 test('public config exposes picker values and no OAuth secret', async () => {
-  const handler = createConfigHandler({ GOOGLE_PICKER_API_KEY: 'picker-key', GOOGLE_CLOUD_PROJECT_NUMBER: '123456', GOOGLE_CLIENT_ID: 'client.apps.googleusercontent.com', GOOGLE_CLIENT_SECRET: 'never-public' });
+  const handler = createConfigHandler({ GOOGLE_PICKER_API_KEY: 'picker-key', GOOGLE_CLOUD_PROJECT_NUMBER: '123456', GEMINI_API_KEY: 'ai-secret', GOOGLE_CLIENT_ID: 'client.apps.googleusercontent.com', GOOGLE_CLIENT_SECRET: 'never-public' });
   const res = response();
   await handler({ method: 'GET', headers: {} }, res);
   assert.equal(res.statusCode, 200);
@@ -17,7 +17,7 @@ test('public config exposes picker values and no OAuth secret', async () => {
 
 test('public config returns a controlled error when picker config is incomplete', async () => {
   const res = response();
-  await createConfigHandler({ GOOGLE_CLOUD_PROJECT_NUMBER: '123456', GOOGLE_CLIENT_ID: 'id' })({ method: 'GET', headers: {} }, res);
+  await createConfigHandler({ GEMINI_API_KEY: 'ai-secret', GOOGLE_CLOUD_PROJECT_NUMBER: '123456', GOOGLE_CLIENT_ID: 'id' })({ method: 'GET', headers: {} }, res);
   assert.equal(res.statusCode, 503);
   assert.equal(res.body.code, 'config_unavailable');
   assert.doesNotMatch(JSON.stringify(res.body), /ai-secret/);

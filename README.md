@@ -12,7 +12,7 @@ The current interface is in Russian. The source and public documentation are in 
 - Google Picker folder selection.
 - Questionnaire import from PDF, DOCX, TXT, Markdown, or pasted text; manual creation and editing are also supported.
 - In-browser microphone capture with questionnaire blocks visible during the interview.
-- Mandatory bring-your-own-key (BYOK) Gemini parsing, chunked transcription with retries, and answer-to-question segmentation.
+- Chunked Gemini transcription with retries, followed by answer-to-question segmentation.
 - Direct, resumable browser-to-Drive audio upload and server-side Markdown upload.
 - Local JSON export of folder/questionnaire settings; no application database.
 - Defensive upload validation, same-origin checks, encrypted session cookies, output normalization, and prompt-injection boundaries.
@@ -22,7 +22,7 @@ The current interface is in Russian. The source and public documentation are in 
 This is a static HTML/CSS/JavaScript frontend plus Vercel Node.js functions:
 
 ```text
-Browser (MediaRecorder, editor, localStorage + session-only Gemini key)
+Browser (MediaRecorder, editor, localStorage)
   |-- OAuth redirects --------------------------> Google OAuth
   |-- folder picker + short-lived access token -> Google Picker / Drive
   |-- questionnaire text/file --> /api/questionnaire/parse --> Gemini
@@ -46,7 +46,6 @@ This is **not** an offline or local-only recorder:
 - The resulting transcript and questionnaire are sent to Gemini for segmentation.
 - Original audio is uploaded to the user's selected Google Drive folder. The transcript and structured answers are saved there as a Markdown file.
 - The app has no database. Folder ID/name and questionnaire are stored in that browser's `localStorage`; the Google refresh token and account email are held in an encrypted, HttpOnly session cookie.
-- Every user supplies a Gemini API key. It is kept only in the current tab's `sessionStorage`, sent in `X-Gemini-API-Key` to same-origin endpoints, used only for that request, and forwarded only to Google Gemini. It is never included in localStorage, IndexedDB, cookies, exports, Markdown, Drive files, or application logs.
 
 Obtain informed consent before recording. See [PRIVACY.md](PRIVACY.md) for retention and deletion details.
 
@@ -86,10 +85,10 @@ Use one Google Cloud project for the OAuth client, Picker project number, and AP
    - Allow `http://localhost:3000/*` and each production origin, for example `https://YOUR_DOMAIN/*`. Add intentional Vercel preview patterns only if you plan to use them.
    - API restriction: restrict the key to **Google Picker API**.
    - Store it as `GOOGLE_PICKER_API_KEY`. It is intentionally returned to the browser by `/api/config`; referrer/API restrictions are its protection.
-6. **Each user creates their own Gemini key** using Google AI Studio or their Google Cloud credential flow:
-   - Restrict it to the Generative Language API where supported, monitor quota, and rotate it after suspected exposure.
-   - Enter it during onboarding. It is held only for the current browser-tab session and can be replaced or cleared in Settings.
-   - Never put it in deployment environment variables or reuse the Picker key. The backend deliberately has no owner-funded key fallback.
+6. **Create a separate Gemini key** using Google AI Studio or the Google Cloud credential flow associated with the project:
+   - Restrict it to the Generative Language API where the credential UI supports API restrictions.
+   - Store it only as `GEMINI_API_KEY` in local/Vercel server environment variables.
+   - Never put it in frontend source or reuse it as the Picker key.
 
 The backend requests offline access with `prompt=consent`, so Google is expected to return a refresh token. If it does not, revoke the app's access in the Google Account and reconnect.
 
@@ -107,6 +106,7 @@ cp .env.example .env.local
 | `GOOGLE_CLIENT_ID` | Server and `/api/config` | Web OAuth client ID; Picker also needs it. |
 | `GOOGLE_CLIENT_SECRET` | Server only | Web OAuth client secret. |
 | `GOOGLE_REDIRECT_URI` | Server only | Exact callback URL, locally `http://localhost:3000/api/auth/callback`. |
+| `GEMINI_API_KEY` | Server only | Calls `gemini-2.0-flash` through the Generative Language API. |
 | `GOOGLE_PICKER_API_KEY` | Browser-visible | Dedicated referrer- and API-restricted Picker key. Never use the Gemini key. |
 | `GOOGLE_CLOUD_PROJECT_NUMBER` | Browser-visible | Numeric Cloud project number used as Picker's app ID. |
 
@@ -129,12 +129,11 @@ Open <http://localhost:3000>. `vercel dev` is required rather than a static file
 
 1. Sign in with Google and grant the requested Drive access.
 2. Select a Drive folder with Google Picker.
-3. Enter your Google Gemini API key for this tab. Closing the tab/browser session clears it; Settings can replace or clear it sooner.
-4. Upload/paste a questionnaire or create one manually; review and edit every question.
-5. Enter the project and interviewee name, obtain recording consent, and grant microphone access.
-6. Move through questionnaire blocks while recording, then finish.
-7. Keep the tab open while audio is transcribed, segmented, and uploaded.
-8. Find the original audio and a `.md` report in the selected Drive folder.
+3. Upload/paste a questionnaire or create one manually; review and edit every question.
+4. Enter the project and interviewee name, obtain recording consent, and grant microphone access.
+5. Move through questionnaire blocks while recording, then finish.
+6. Keep the tab open while audio is transcribed, segmented, and uploaded.
+7. Find the original audio and a `.md` report in the selected Drive folder.
 
 On processing failure, the recording remains only in that open tab's memory for retry. Closing/reloading the tab loses it.
 
@@ -144,7 +143,7 @@ There is no account-backed application database. The selected folder metadata an
 
 ## API overview
 
-All mutation endpoints enforce the request method and same-origin checks; authenticated endpoints require the encrypted session cookie. The three Gemini endpoints additionally require a conservatively validated `X-Gemini-API-Key` header. The key is read per request and never sourced from server environment configuration.
+All mutation endpoints enforce the request method and same-origin checks; authenticated endpoints require the encrypted session cookie.
 
 | Endpoint | Method | Purpose |
 |---|---:|---|
@@ -170,12 +169,12 @@ All mutation endpoints enforce the request method and same-origin checks; authen
 - Markdown Drive upload: under 5,000,000 bytes.
 - Vercel functions are configured with a 30-second maximum duration. The browser uses longer request timeouts, but host/provider limits still apply.
 - Recordings are memory-backed; long interviews can consume substantial browser memory. Audio is not durably saved until the final Drive upload succeeds.
-- Gemini quotas, pricing, model availability, and provider retention terms belong to the user who supplies the key; Drive terms belong to the connected account/project.
+- Gemini and Google Drive quotas, pricing, model availability, and provider retention terms belong to the project/account operator.
 
 ## Vercel deployment
 
 1. Import/fork the repository into Vercel (Framework Preset: **Other** is sufficient) or run `npx vercel` from the repository.
-2. Add all six variables from `.env.example` in **Project Settings → Environment Variables**. Do not configure a Gemini server key; users provide keys in the UI. Use the production callback URL for Production; preview deployments need their own exact redirect URI/configuration if used.
+2. Add all seven variables from `.env.example` in **Project Settings → Environment Variables**. Use the production callback URL for Production; preview deployments need their own exact redirect URI/configuration if used.
 3. In Google Cloud, add the final Vercel/custom-domain origin and exact `/api/auth/callback` redirect, and add its `/*` referrer to the Picker key.
 4. Deploy, then verify `/api/config`, sign-in, folder selection, a short consented test recording, and both Drive files using non-sensitive test data.
 5. Keep OAuth in Testing with explicit test users until your consent screen, domains, policies, and verification status are ready. This project has not established public OAuth verification or live Google E2E completion.
@@ -189,14 +188,14 @@ Do not deploy `.env.local`, do not expose server variables as client-prefixed va
 - **Authorization fails after consent:** Google may not return a refresh token. Revoke prior app access, reconnect, and ensure the app requests offline access; also check client ID/secret and callback URL.
 - **Picker does not open / `/api/config` returns 503:** enable Picker API and set a numeric project number, OAuth client ID, and dedicated Picker key. Check browser console for referrer/API-key restriction errors.
 - **Drive folder or upload denied:** enable Drive API, reconnect to grant `drive.file`, and select the folder through this app. The scope is intentionally not broad read/write access to all Drive files.
-- **Gemini unavailable, key rejected, or parsing falls back:** enter a current Google Gemini key in Settings and verify its Generative Language API access, restrictions, billing/quota, and model availability. Do not paste keys into logs or support reports. Questionnaire parsing has a basic fallback; transcription does not.
+- **Gemini unavailable or parsing falls back:** verify `GEMINI_API_KEY`, Generative Language API access, model availability, billing/quota, and Vercel logs. Questionnaire parsing has a basic fallback; transcription does not.
 - **413 / unsupported type:** respect the per-request limits and MIME types above. A filename extension alone is not sufficient for questionnaire files.
 - **Microphone denied / empty recording:** use HTTPS or localhost, grant browser/OS microphone permission, keep the device connected, and retry with a supported browser.
 - **Works locally but not on Vercel:** compare environment scopes (Development/Preview/Production), callback domain, Picker referrers, and function logs. Environment changes require a redeploy.
 
 ## Security
 
-- Never commit credentials or real interview data. Users must keep their Gemini key private and apply least-privilege restrictions; operators must not configure or log an owner key.
+- Never commit credentials or real interview data. Use separate Picker and Gemini keys and apply least-privilege restrictions.
 - Sessions are AES-256-GCM sealed, HttpOnly, SameSite=Lax cookies (`Secure` in production), with a 30-day expiry. OAuth state expires after five minutes and uses HMAC plus PKCE.
 - There is no server-side session revocation store. Logout clears this browser's cookie; revoke the app in the Google Account to invalidate Google authorization, and rotate OAuth credentials/`SESSION_SECRET` after compromise.
 - `drive.file` limits the app to files it creates or that users explicitly open/select with it; access tokens are still sensitive and briefly exposed to browser code for Picker/direct upload.

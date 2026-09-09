@@ -22,7 +22,7 @@ Keep pull requests small. Explain the user problem, implementation, privacy/secu
 ## Style
 
 - Use the existing dependency-light ES module architecture and Node built-ins where practical.
-- Preserve clear browser/server trust boundaries. User Gemini keys must remain session-only and OAuth client secrets server-only.
+- Preserve clear browser/server trust boundaries. Gemini keys and OAuth client secrets must remain server-only.
 - Validate methods, origin, authentication, input size/type, provider responses, filenames, and identifiers.
 - Treat documents, audio, transcripts, model output, and provider errors as untrusted.
 - Return stable JSON errors and avoid leaking credentials or upstream response bodies.
