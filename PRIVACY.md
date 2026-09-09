@@ -1,4 +1,8 @@
-# Privacy Notice
+# Privacy
+
+## Independent operator
+
+CustDev Recorder is distributed only as self-hosted source. The repository owner operates no application service, user account system, shared Google/Gemini credentials, proxy, database, analytics, or telemetry. Your deployment operator controls the server/provider accounts and is the data controller responsible for disclosures, consent, retention, provider configuration, and deletion. Google receives data only when users operate that independently configured deployment as described below.
 
 This notice describes the open-source CustDev Recorder code. Each deployment is operated independently. Its operator must identify themselves, provide any legally required notice/contact, configure Google/Vercel accounts, and update this document for their jurisdiction and practices.
 

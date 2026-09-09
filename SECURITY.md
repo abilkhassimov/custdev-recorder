@@ -1,5 +1,9 @@
 # Security Policy
 
+## Self-host responsibility
+
+There is no owner-operated deployment or shared credential/quota. Each operator is responsible for TLS, host patching, access controls, rate limits, spending alerts, OAuth consent, key restrictions, logs, backups, and incident response. Never send secrets or sensitive recordings in a vulnerability report. Use separate Gemini and browser-restricted Picker keys and keep `GEMINI_API_KEY`, `GOOGLE_CLIENT_SECRET`, and `SESSION_SECRET` server-only.
+
 ## Supported version
 
 Until versioned releases are published, only the latest commit on the default branch is supported with security fixes. Older commits, forks, and third-party deployments are not supported by this policy.

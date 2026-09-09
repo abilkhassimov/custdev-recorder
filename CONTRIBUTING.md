@@ -1,5 +1,9 @@
 # Contributing
 
+This project is an independently self-hosted template. Contributions must not introduce owner-hosted dependencies, telemetry, shared accounts/keys/quotas, or client exposure of server credentials. Never include populated env files, credentials, provider responses, or interview data. Agents must follow [AGENTS.md](AGENTS.md).
+
+For script/server behavior, use strict red-green-refactor: add one focused failing `node:test`, run it and confirm the expected failure, implement the minimum change, rerun it, then run the full suite. Documentation/config-only changes do not require invented tests.
+
 Thank you for improving CustDev Recorder.
 
 ## Before starting

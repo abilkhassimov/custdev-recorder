@@ -1,5 +1,9 @@
 # CustDev Recorder
 
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fabilkhassimov%2Fcustdev-recorder)
+
+> **Independent self-hosting only.** This repository is a template, not a hosted service. Every installer supplies and controls their own Vercel account or server, Google Cloud project, OAuth application, Picker key, Gemini key, Drive account/data, billing, and quotas. The repository owner provides **no service, accounts, credentials, quota, data processing, or telemetry**. Nothing is sent to the owner.
+
 CustDev Recorder is a small, browser-based field recorder for customer-development interviews. It displays an editable questionnaire while recording, uses Google Gemini to transcribe and map answers to questions, then saves the original audio and a Markdown report to a folder selected in the user's own Google Drive.
 
 > **Release status:** the automated test suite covers the local application and mocked provider boundaries. Google OAuth verification and a live Google/Gemini end-to-end test have **not** been completed. Keep an OAuth app in Testing mode until you have configured and validated your own deployment.
@@ -19,7 +23,7 @@ The current interface is in Russian. The source and public documentation are in 
 
 ## Architecture and data flow
 
-This is a static HTML/CSS/JavaScript frontend plus Vercel Node.js functions:
+This is a static HTML/CSS/JavaScript frontend plus Node.js API handlers. They run as Vercel functions or through the included standard Node server/Docker image:
 
 ```text
 Browser (MediaRecorder, editor, localStorage)
@@ -123,7 +127,9 @@ npm run check
 npx vercel dev --listen 3000
 ```
 
-Open <http://localhost:3000>. `vercel dev` is required rather than a static file server because the `/api` functions perform OAuth, Gemini, and Drive operations. If prompted, link/create a Vercel project; do not pull production secrets into a shared workstation.
+For the standard Node path, load the same variables into the process and run `npm start`; unlike `vercel dev`, Node itself does not automatically load `.env.local`. Validate the protected environment first with `npm run preflight`. See [the agent runbook](AGENTS.md) and [machine-readable checklist](docs/AGENT_SETUP.md).
+
+Open <http://localhost:3000>. Use either `vercel dev` or `npm start`, not a static-only file server, because the `/api` handlers perform OAuth, Gemini, and Drive operations. If Vercel prompts, link/create your own project; do not pull production secrets into a shared workstation.
 
 ## User workflow
 
@@ -180,6 +186,16 @@ All mutation endpoints enforce the request method and same-origin checks; authen
 5. Keep OAuth in Testing with explicit test users until your consent screen, domains, policies, and verification status are ready. This project has not established public OAuth verification or live Google E2E completion.
 
 Do not deploy `.env.local`, do not expose server variables as client-prefixed values, and do not broadly allow wildcard referrers for the Picker key.
+
+## Generic VPS / Docker deployment
+
+```sh
+docker build -t custdev-recorder .
+docker run --restart unless-stopped --env-file /secure/path/custdev.env \
+  -p 127.0.0.1:3000:3000 custdev-recorder
+```
+
+Put Caddy, nginx, Traefik, or another reverse proxy in front of the bound loopback port. Terminate TLS there, preserve the public `Host` header, set `X-Forwarded-Proto: https`, and do not expose port 3000 directly. Set both Google Cloud and `GOOGLE_REDIRECT_URI` to `https://YOUR_DOMAIN/api/auth/callback`. After DNS/TLS is ready, run `npm run verify:deployment -- https://YOUR_DOMAIN`; it performs public, secret-free checks. The complete install/rollback procedure is in [AGENTS.md](AGENTS.md).
 
 ## Troubleshooting
 

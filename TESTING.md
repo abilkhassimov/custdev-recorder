@@ -1,5 +1,22 @@
 # Testing
 
+## Self-host installation gates
+
+```sh
+npm ci
+npm test
+npm run check
+npm audit --omit=dev
+# In a protected environment containing all seven variables; output never includes values:
+npm run preflight
+# After deployment; sends no cookies, authorization, request bodies, or secrets:
+npm run verify:deployment -- https://YOUR_DOMAIN
+```
+
+`preflight` validates required names, credential shapes/separation, the exact `/api/auth/callback` path, and HTTPS in production. `verify:deployment` checks page/static/config behavior, OAuth redirect, baseline security headers, method rejection, and controlled unknown-route errors. It does not complete OAuth or call Gemini/Drive: manually test those with non-sensitive data and the operator's own accounts.
+
+Server and script changes require strict TDD. Keep route/static traversal tests in the full suite. A Vercel build smoke test is `npm run vercel-build`; test the container with `docker build -t custdev-recorder:test .` when Docker is available.
+
 The automated suite uses Node's built-in test runner and mocked Google/Gemini boundaries. It does not require secrets or network access.
 
 ## Verified commands
